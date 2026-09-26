@@ -28,6 +28,11 @@ class SoundSourceLocalization:
         self.microphone_array = np.array(positions)
 
     def gcc_phat(self, sig1: np.ndarray, sig2: np.ndarray, max_tau: Optional[float] = None) -> float:
+        sig1 = np.asarray(sig1, dtype=float)
+        sig2 = np.asarray(sig2, dtype=float)
+        if sig1.size == 0 or sig2.size == 0:
+            return 0.0
+
         n = sig1.shape[0] + sig2.shape[0]
         
         SIG1 = np.fft.rfft(sig1, n=n)
@@ -92,6 +97,15 @@ class SoundSourceLocalization:
     def scan_for_sources(self, signals: List[np.ndarray], 
                          scan_range: Tuple[float, float] = (-5.0, 5.0),
                          resolution: int = 50) -> Dict:
+        if resolution < 2:
+            return {
+                'power_map': [],
+                'x_coords': [],
+                'y_coords': [],
+                'sources': [],
+                'error': f'resolution 必须为 >= 2 的正整数，收到 {resolution}'
+            }
+
         x = np.linspace(scan_range[0], scan_range[1], resolution)
         y = np.linspace(scan_range[0], scan_range[1], resolution)
         X, Y = np.meshgrid(x, y)
@@ -166,7 +180,9 @@ class SoundSourceLocalization:
         peaks.sort(key=lambda x: x['confidence'], reverse=True)
         return peaks[:5]
 
-    def process_localization(self, audio_signals: List[np.ndarray]) -> Dict:
+    def process_localization(self, audio_signals: List[np.ndarray],
+                             scan_range: Tuple[float, float] = (-5.0, 5.0),
+                             resolution: int = 50) -> Dict:
         if len(audio_signals) < 2:
             return {
                 'success': False,
@@ -175,7 +191,7 @@ class SoundSourceLocalization:
         
         tdoa_matrix = self.estimate_tdoa(audio_signals)
         estimated_position = self.tdoa_to_position(tdoa_matrix)
-        scan_results = self.scan_for_sources(audio_signals)
+        scan_results = self.scan_for_sources(audio_signals, scan_range=scan_range, resolution=resolution)
         
         return {
             'success': True,
@@ -195,7 +211,11 @@ class SoundSourceLocalization:
             signals = [audio_chunk[:, i] for i in range(audio_chunk.shape[1])]
         
         if len(signals) < 2:
-            return {'position': previous_estimate.tolist() if previous_estimate else [0, 0, 0]}
+            if previous_estimate is not None:
+                position = np.asarray(previous_estimate, dtype=float).tolist()
+            else:
+                position = [0, 0, 0]
+            return {'position': position, 'confidence': 0.0}
         
         tdoa_matrix = self.estimate_tdoa(signals)
         new_estimate = self.tdoa_to_position(tdoa_matrix)

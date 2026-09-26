@@ -138,13 +138,38 @@ cd backend && python -m pytest -q
 20. `summary_generator` 的 Markdown 生成、`transcriber` 的 `generate_markdown_transcript`、
     加密往返、`gcc_phat` 对正常信号的时延估计结果必须保持原有语义。
 
-## 已知问题（现象举例，不完整）
+## 变更说明
 
-- 用错误的密钥解密文件，接口返回「成功」，拿到的却是密文本身。
-- 邮件服务没配好，发送结果却显示 `success: true`。
-- 传一个空音频文件也能创建处理任务。
-- 声源定位传 `resolution=0` 或负的 `scan_range` 直接 500。
-- 实时推送里有一个客户端掉线后，其它客户端就收不到消息了，而且掉线的连接越积越多。
+以下问题已按「行为规格」逐条修复，每条注明根因与修法：
+
+- **错误密钥解密返回密文冒充明文**：`MarkdownEncryptor.decrypt_markdown` 在解密失败或未配置
+  密钥时用 `decode(errors='replace')` 把密文原样返回。现改为抛出 `ValueError`（密钥错误 /
+  未配置密钥），`/api/decrypt` 据此返回 `success: false` 与错误原因，不再返回 `content`。
+- **未配置 SMTP 却报告发送成功**：`EmailSender._mock_send_email` 返回 `success: True`。
+  现改为 `success: False` 并带「SMTP 未配置，邮件未发送」原因，`generate_and_dispatch`
+  的 `email.success` 随之与真实投递结果一致。
+- **空音频文件也能创建任务**：`/api/process/audio` 未校验上传内容。现先读取文件，
+  空内容返回 `400` 且不创建任务；保存失败时也会清理已注册的任务记录。
+- **定位接口参数越界直接 500**：`/api/process/localization` 未校验 `scan_range` /
+  `resolution`。现 `scan_range <= 0` 或 `resolution < 2` 返回 `422`；`HTTPException`
+  不再被兜底 `except` 包成 `500`；音频依赖缺失仍为 `503`；`scan_range` / `resolution`
+  也真正透传给扫描算法，不再只是回显。
+- **定位算法边界抛异常**：`gcc_phat` 对空信号做零长度 FFT 抛 `ValueError`，现返回
+  可预期的 `0.0`；`scan_for_sources` 在 `resolution < 2` 时对空数组求 `max` 抛
+  `ValueError`，现返回空结果并附错误说明；`real_time_localization_update` 单路 1D
+  信号时返回值缺少 `confidence`、且 `previous_estimate` 为 list 时会 `AttributeError`，
+  现统一返回可用的 `position` 与 `confidence`。
+- **异常说话人数导致崩溃或静默改值**：`PyannoteDiarizer.diarize` 对 `num_speakers <= 0`
+  会 `IndexError`（`-1`）或静默改成 3（`0`）。现统一拒绝并返回
+  `success: False` 与错误原因。
+- **WebSocket 坏连接堆积并阻断广播**：`ConnectionManager.broadcast` 用裸 `except: pass`
+  吞掉异常但不摘除连接。现广播时把发送失败的连接从 `active_connections` 摘除，
+  并继续向其余连接广播；`disconnect` 保持幂等。
+- **任务状态值不受约束**：`update_task_status` 接受任意字符串。现只允许
+  `queued / processing / completed / failed`，其余值抛 `ValueError`。
+- **加解密接口空密钥被静默当成「未加密」**：`/api/encrypt` 与 `/api/decrypt` 现对
+  空白 `key` 返回 `422`；未配置密钥时 `encrypt_markdown` 仍以 `method: "none"`
+  明确表示未加密。
 
 ## 技术栈
 

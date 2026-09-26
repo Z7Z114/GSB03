@@ -120,6 +120,15 @@ class PyannoteDiarizer:
             self.pipeline = None
 
     def diarize(self, audio_path: str, num_speakers: Optional[int] = None) -> Dict:
+        if num_speakers is not None and num_speakers <= 0:
+            return {
+                "success": False,
+                "error": f"num_speakers 必须为正整数，收到 {num_speakers}",
+                "num_speakers": 0,
+                "speakers": [],
+                "segments": []
+            }
+
         if self.pipeline is None:
             return self._mock_diarize(audio_path, num_speakers)
 

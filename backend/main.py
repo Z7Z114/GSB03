@@ -95,14 +95,19 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: Dict):
-        for connection in self.active_connections:
+        stale_connections = []
+        for connection in list(self.active_connections):
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception:
+                stale_connections.append(connection)
+        for connection in stale_connections:
+            self.disconnect(connection)
 
 
 manager = ConnectionManager()
+
+TASK_STATUSES = {"queued", "processing", "completed", "failed"}
 
 
 @app.get("/")
@@ -142,6 +147,14 @@ async def process_audio(
     task_id = str(uuid.uuid4())
     request = request or AudioProcessingRequest()
 
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read uploaded file: {e}")
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="上传的音频文件为空，无法创建处理任务")
+
     processing_tasks[task_id] = {
         "task_id": task_id,
         "status": "queued",
@@ -155,10 +168,10 @@ async def process_audio(
     input_path = os.path.join(temp_dir, f"input_{task_id}.wav")
 
     try:
-        contents = await file.read()
         with open(input_path, "wb") as f:
             f.write(contents)
     except Exception as e:
+        processing_tasks.pop(task_id, None)
         raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
 
     background_tasks.add_task(
@@ -272,6 +285,8 @@ async def process_audio_background(
 
 
 def update_task_status(task_id: str, status: str, progress: float, message: str, result: Optional[Dict] = None):
+    if status not in TASK_STATUSES:
+        raise ValueError(f"未知任务状态: {status}（允许值: {sorted(TASK_STATUSES)}）")
     if task_id in processing_tasks:
         processing_tasks[task_id].update({
             "status": status,
@@ -307,6 +322,11 @@ async def process_localization(
     scan_range: float = 5.0,
     resolution: int = 50
 ):
+    if scan_range <= 0:
+        raise HTTPException(status_code=422, detail="scan_range 必须为正数")
+    if resolution < 2:
+        raise HTTPException(status_code=422, detail="resolution 必须为 >= 2 的正整数")
+
     if len(files) < 2:
         raise HTTPException(status_code=400, detail="At least 2 microphone signals required for localization")
 
@@ -327,7 +347,11 @@ async def process_localization(
             y, sr = librosa.load(temp_path, sr=audio_processor.sample_rate, mono=True)
             audio_signals.append(y)
 
-        localization_result = localization.process_localization(audio_signals)
+        localization_result = localization.process_localization(
+            audio_signals,
+            scan_range=(-scan_range, scan_range),
+            resolution=resolution
+        )
 
         return {
             "success": True,
@@ -336,6 +360,8 @@ async def process_localization(
             "scan_range": scan_range,
             "resolution": resolution
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Localization failed: {e}")
     finally:
@@ -416,6 +442,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/api/decrypt")
 async def decrypt_file(file: UploadFile = File(...), key: str = Form(...)):
+    if not key or not key.strip():
+        raise HTTPException(status_code=422, detail="key 不能为空")
     try:
         from .encrypted_email import MarkdownEncryptor
         
@@ -437,6 +465,8 @@ async def decrypt_file(file: UploadFile = File(...), key: str = Form(...)):
 
 @app.post("/api/encrypt")
 async def encrypt_file(content: str = Form(...), key: str = Form(...)):
+    if not key or not key.strip():
+        raise HTTPException(status_code=422, detail="key 不能为空")
     try:
         from .encrypted_email import MarkdownEncryptor
         
@@ -453,4 +483,3 @@ async def encrypt_file(content: str = Form(...), key: str = Form(...)):
             "success": False,
             "error": str(e)
         }
-
