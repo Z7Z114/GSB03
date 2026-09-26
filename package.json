@@ -1,0 +1,27 @@
+{
+  "name": "laser-vibrometry-spy-system",
+  "version": "1.0.0",
+  "description": "Laser vibrometry based remote audio acquisition system for authorized security testing",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.5",
+    "axios": "^1.6.5",
+    "chart.js": "^4.4.1",
+    "vue-chartjs": "^5.3.0",
+    "three": "^0.160.0",
+    "element-plus": "^2.5.3",
+    "@element-plus/icons-vue": "^2.3.1",
+    "socket.io-client": "^4.7.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.3",
+    "vite": "^5.0.11"
+  }
+}
