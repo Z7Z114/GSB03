@@ -95,11 +95,14 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: Dict):
-        for connection in self.active_connections:
+        stale_connections = []
+        for connection in list(self.active_connections):
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception:
+                stale_connections.append(connection)
+        for connection in stale_connections:
+            self.disconnect(connection)
 
 
 manager = ConnectionManager()
@@ -142,6 +145,10 @@ async def process_audio(
     task_id = str(uuid.uuid4())
     request = request or AudioProcessingRequest()
 
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="上传的音频文件为空，无法创建处理任务")
+
     processing_tasks[task_id] = {
         "task_id": task_id,
         "status": "queued",
@@ -155,7 +162,6 @@ async def process_audio(
     input_path = os.path.join(temp_dir, f"input_{task_id}.wav")
 
     try:
-        contents = await file.read()
         with open(input_path, "wb") as f:
             f.write(contents)
     except Exception as e:
@@ -307,6 +313,11 @@ async def process_localization(
     scan_range: float = 5.0,
     resolution: int = 50
 ):
+    if scan_range <= 0:
+        raise HTTPException(status_code=422, detail=f"scan_range 必须为正数，收到: {scan_range}")
+    if resolution < 2:
+        raise HTTPException(status_code=422, detail=f"resolution 必须为 >= 2 的正整数，收到: {resolution}")
+
     if len(files) < 2:
         raise HTTPException(status_code=400, detail="At least 2 microphone signals required for localization")
 
@@ -415,7 +426,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 @app.post("/api/decrypt")
-async def decrypt_file(file: UploadFile = File(...), key: str = Form(...)):
+async def decrypt_file(file: UploadFile = File(...), key: str = Form(..., min_length=1)):
     try:
         from .encrypted_email import MarkdownEncryptor
         
@@ -436,15 +447,24 @@ async def decrypt_file(file: UploadFile = File(...), key: str = Form(...)):
 
 
 @app.post("/api/encrypt")
-async def encrypt_file(content: str = Form(...), key: str = Form(...)):
+async def encrypt_file(content: str = Form(...), key: str = Form(..., min_length=1)):
     try:
         from .encrypted_email import MarkdownEncryptor
         
         encryptor = MarkdownEncryptor(encryption_key=key)
         encrypted_data, method = encryptor.encrypt_markdown(content)
         
+        if method != "fernet":
+            return {
+                "success": False,
+                "encrypted": False,
+                "method": method,
+                "error": "内容未被加密：加密密钥不可用"
+            }
+
         return {
             "success": True,
+            "encrypted": True,
             "encrypted_data": encrypted_data.hex(),
             "method": method
         }
@@ -453,4 +473,3 @@ async def encrypt_file(content: str = Form(...), key: str = Form(...)):
             "success": False,
             "error": str(e)
         }
-

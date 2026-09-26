@@ -120,6 +120,9 @@ class PyannoteDiarizer:
             self.pipeline = None
 
     def diarize(self, audio_path: str, num_speakers: Optional[int] = None) -> Dict:
+        if num_speakers is not None and num_speakers <= 0:
+            raise ValueError(f"num_speakers 必须为正整数，收到: {num_speakers}")
+
         if self.pipeline is None:
             return self._mock_diarize(audio_path, num_speakers)
 
@@ -189,6 +192,12 @@ class MeetingTranscriptIntegrator:
     def process_meeting_audio(self, audio_path: str, 
                               num_speakers: Optional[int] = None,
                               language: str = "zh") -> Dict:
+        if num_speakers is not None and num_speakers <= 0:
+            return {
+                "success": False,
+                "error": f"num_speakers 必须为正整数，收到: {num_speakers}"
+            }
+
         print("Starting transcription...")
         transcription = self.transcriber.transcribe(audio_path, language=language)
 

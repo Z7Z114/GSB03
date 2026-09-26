@@ -56,14 +56,14 @@ class MarkdownEncryptor:
 
     def decrypt_markdown(self, encrypted_data: bytes) -> str:
         if self.fernet is None:
-            return encrypted_data.decode('utf-8', errors='replace')
+            raise ValueError("未配置加密密钥，无法解密")
 
         try:
             decrypted = self.fernet.decrypt(encrypted_data)
             return decrypted.decode('utf-8')
         except Exception as e:
-            print(f"Decryption failed: {e}")
-            return encrypted_data.decode('utf-8', errors='replace')
+            detail = f"（{e}）" if str(e) else ""
+            raise ValueError(f"解密失败：密钥错误或密文已损坏{detail}") from e
 
     def save_encrypted_file(self, markdown_content: str, output_path: str) -> Dict:
         encrypted_data, method = self.encrypt_markdown(markdown_content)
@@ -129,7 +129,7 @@ class EmailSender:
                             cc_emails: Optional[List[str]] = None,
                             bcc_emails: Optional[List[str]] = None) -> Dict:
         if not all([self.smtp_server, self.smtp_port, self.smtp_user, self.smtp_password]):
-            return self._mock_send_email(to_emails, subject, markdown_content)
+            return self._smtp_not_configured(to_emails, subject, markdown_content)
 
         try:
             msg = MIMEMultipart()
@@ -181,15 +181,15 @@ class EmailSender:
                 "error": str(e)
             }
 
-    def _mock_send_email(self, to_emails: List[str], subject: str, 
-                         markdown_content: str) -> Dict:
+    def _smtp_not_configured(self, to_emails: List[str], subject: str,
+                             markdown_content: str) -> Dict:
         return {
-            "success": True,
+            "success": False,
             "to": to_emails,
             "subject": subject,
             "content_preview": markdown_content[:500] + "..." if len(markdown_content) > 500 else markdown_content,
-            "note": "Using mock email sending - SMTP not configured",
-            "message": "Email would be sent if SMTP were configured"
+            "note": "SMTP not configured - email NOT sent",
+            "error": "SMTP 未配置，邮件未发送"
         }
 
 

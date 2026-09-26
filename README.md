@@ -138,13 +138,42 @@ cd backend && python -m pytest -q
 20. `summary_generator` 的 Markdown 生成、`transcriber` 的 `generate_markdown_transcript`、
     加密往返、`gcc_phat` 对正常信号的时延估计结果必须保持原有语义。
 
-## 已知问题（现象举例，不完整）
+## 变更说明
 
-- 用错误的密钥解密文件，接口返回「成功」，拿到的却是密文本身。
-- 邮件服务没配好，发送结果却显示 `success: true`。
-- 传一个空音频文件也能创建处理任务。
-- 声源定位传 `resolution=0` 或负的 `scan_range` 直接 500。
-- 实时推送里有一个客户端掉线后，其它客户端就收不到消息了，而且掉线的连接越积越多。
+本次修复以「行为规格」为验收标准，逐条记录根因与修法：
+
+1. **解密失败冒充成功**（规格 A3）：`MarkdownEncryptor.decrypt_markdown` 捕获异常后用
+   `decode(errors='replace')` 把密文原样当明文返回。现改为抛出 `ValueError`（密钥错误 /
+   密文损坏 / 未配置密钥），`/api/decrypt` 据此返回 `success: false` 与错误原因。
+2. **加密结果不透明**（规格 A1/A2/A4）：`/api/encrypt` 的 `key` 增加 `min_length=1` 校验
+   （空 key 返回 422）；响应新增 `encrypted` 字段，当 `encrypt_markdown` 报告的方法不是
+   `fernet`（即内容实际未加密）时返回 `success: false`，不再静默按「已加密」处理。
+3. **邮件未配置却报成功**（规格 B5/B6）：`EmailSender` 在 SMTP 未配置时走
+   `_mock_send_email` 返回 `success: true`。现改为 `_smtp_not_configured` 返回
+   `success: false` 并带可读原因，`MeetingMinutesDispatcher.generate_and_dispatch` 的
+   `email.success` 随之与真实投递结果一致。
+4. **空文件创建任务**（规格 C7）：`/api/process/audio` 原先把空文件也排队成任务。现在
+   先读取上传内容，空文件直接返回 400，且不创建任务记录。
+5. **定位参数越界 500**（规格 D10）：`/api/process/localization` 原先不校验
+   `scan_range` / `resolution`。现在 `scan_range <= 0` 或 `resolution < 2` 返回 422。
+6. **`gcc_phat` 空信号崩溃**（规格 D12）：信号长度为 0 时 FFT 长度 `n=0` 触发 numpy
+   `ValueError`。现在任一输入为空信号时返回可预期的 `0.0`。
+7. **`scan_for_sources` 分辨率过小崩溃**（规格 D12）：`resolution=0` 时对空数组取
+   `np.max` 抛 `ValueError`。现在 `resolution < 2` 时返回空结果（空 `power_map` 与
+   空 `sources`）。
+8. **实时定位单路信号异常**（规格 D13）：`real_time_localization_update` 对 numpy 数组
+   做真值判断（`if previous_estimate`）会抛 `ValueError`，且单路信号时返回值缺少
+   `confidence`。现在显式判断 `is not None`，单路信号返回可用的 `position` 与
+   `confidence: 0.0`。
+9. **说话人数非法**（规格 E15）：`num_speakers <= 0` 时 `-1` 触发 `IndexError`、`0` 被
+   静默改成默认 3。现在 `PyannoteDiarizer.diarize` 统一抛出 `ValueError`，
+   `MeetingTranscriptIntegrator.process_meeting_audio` 返回 `success: false` 与原因。
+10. **WebSocket 坏连接堆积**（规格 F17）：`ConnectionManager.broadcast` 原先裸
+    `except: pass` 吞掉异常但不摘除连接，坏连接永久堆积且可能阻断后续广播。现在发送
+    失败的连接会被移出 `active_connections`，其余连接继续正常收到消息。
+
+离线行为保持不变：未安装 Whisper / pyannote / librosa 或未配置 OpenAI、SMTP 时仍走
+确定性离线分支，且离线结果均带 `note` 等字段如实标注，不冒充真实模型输出。
 
 ## 技术栈
 

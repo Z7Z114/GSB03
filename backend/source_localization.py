@@ -28,6 +28,9 @@ class SoundSourceLocalization:
         self.microphone_array = np.array(positions)
 
     def gcc_phat(self, sig1: np.ndarray, sig2: np.ndarray, max_tau: Optional[float] = None) -> float:
+        if sig1.shape[0] == 0 or sig2.shape[0] == 0:
+            return 0.0
+
         n = sig1.shape[0] + sig2.shape[0]
         
         SIG1 = np.fft.rfft(sig1, n=n)
@@ -92,6 +95,14 @@ class SoundSourceLocalization:
     def scan_for_sources(self, signals: List[np.ndarray], 
                          scan_range: Tuple[float, float] = (-5.0, 5.0),
                          resolution: int = 50) -> Dict:
+        if resolution < 2:
+            return {
+                'power_map': [],
+                'x_coords': [],
+                'y_coords': [],
+                'sources': []
+            }
+
         x = np.linspace(scan_range[0], scan_range[1], resolution)
         y = np.linspace(scan_range[0], scan_range[1], resolution)
         X, Y = np.meshgrid(x, y)
@@ -195,8 +206,9 @@ class SoundSourceLocalization:
             signals = [audio_chunk[:, i] for i in range(audio_chunk.shape[1])]
         
         if len(signals) < 2:
-            return {'position': previous_estimate.tolist() if previous_estimate else [0, 0, 0]}
-        
+            position = previous_estimate.tolist() if previous_estimate is not None else [0, 0, 0]
+            return {'position': position, 'confidence': 0.0}
+
         tdoa_matrix = self.estimate_tdoa(signals)
         new_estimate = self.tdoa_to_position(tdoa_matrix)
         
